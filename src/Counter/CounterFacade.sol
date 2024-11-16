@@ -10,7 +10,9 @@ import {PoolId, PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
 import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "v4-core/src/types/BeforeSwapDelta.sol";
 
-contract CounterFacade {
+import {Reader} from "bundle/Counter/Reader.sol";
+
+contract CounterFacade is Reader {
 
     function getHookPermissions() public pure returns (Hooks.Permissions memory) {
         return Hooks.Permissions({
