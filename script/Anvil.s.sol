@@ -88,7 +88,7 @@ contract CounterScript is MCScript, DeployPermit2 {
         return IPositionManager(new PositionManager(poolManager, permit2, 300_000, IPositionDescriptor(address(0)), IWETH9(address(0))));
     }
 
-    function approvePosmCurrency(IPositionManager posm, Currency currency) internal {
+    function approvePosmCurrency(Currency currency) internal {
         // Because POSM uses permit2, we must execute 2 permits/approvals.
         // 1. First, the caller must approve permit2 on the token.
         IERC20(Currency.unwrap(currency)).approve(address(permit2), type(uint256).max);
@@ -167,8 +167,8 @@ contract CounterScript is MCScript, DeployPermit2 {
         token0.approve(address(swapRouter), type(uint256).max);
         token1.approve(address(swapRouter), type(uint256).max);
 
-        approvePosmCurrency(posm, Currency.wrap(address(token0)));
-        approvePosmCurrency(posm, Currency.wrap(address(token1)));
+        approvePosmCurrency(Currency.wrap(address(token0)));
+        approvePosmCurrency(Currency.wrap(address(token1)));
 
         // add full range liquidity to the pool
         lpRouter.modifyLiquidity(
