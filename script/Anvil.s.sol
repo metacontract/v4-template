@@ -25,36 +25,35 @@ import {IERC20} from "forge-std/interfaces/IERC20.sol";
 import {IPositionDescriptor} from "v4-periphery/src/interfaces/IPositionDescriptor.sol";
 import {IWETH9} from "v4-periphery/src/interfaces/external/IWETH9.sol";
 
+import "forge-std/console.sol";
+
+import {MCScript} from "@mc-devkit/MCScript.sol";
+import {Proxy as UCSProxy} from "@ucs.mc/proxy/Proxy.sol";
+
+import {Base} from "bundle/Counter/functions/Base.sol";
+import {AfterSwap} from "bundle/Counter/functions/AfterSwap.sol";
+import {BeforeAddLiquidity} from "bundle/Counter/functions/BeforeAddLiquidity.sol";
+import {BeforeRemoveLiquidity} from "bundle/Counter/functions/BeforeRemoveLiquidity.sol";
+import {BeforeSwap} from "bundle/Counter/functions/BeforeSwap.sol";
+import {CounterFacade} from "bundle/Counter/CounterFacade.sol";
+
 /// @notice Forge script for deploying v4 & hooks to **anvil**
 /// @dev This script only works on an anvil RPC because v4 exceeds bytecode limits
-contract CounterScript is Script, DeployPermit2 {
+contract CounterScript is MCScript, DeployPermit2 {
     using EasyPosm for IPositionManager;
 
     address constant CREATE2_DEPLOYER = address(0x4e59b44847b379578588920cA78FbF26c0B4956C);
-
+    
     function setUp() public {}
 
     function run() public {
         vm.broadcast();
         IPoolManager manager = deployPoolManager();
 
-        // hook contracts must have specific flags encoded in the address
-        uint160 permissions = uint160(
-            Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
-                | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
-        );
-
-        // Mine a salt that will produce a hook address with the correct permissions
-        (address hookAddress, bytes32 salt) =
-            HookMiner.find(CREATE2_DEPLOYER, permissions, type(Counter).creationCode, abi.encode(address(manager)));
-
-        // ----------------------------- //
-        // Deploy the hook using CREATE2 //
-        // ----------------------------- //
-        vm.broadcast();
-        Counter counter = new Counter{salt: salt}(manager);
-        require(address(counter) == hookAddress, "CounterScript: hook address mismatch");
-
+        vm.startBroadcast();
+        address counter = deployHook();
+        vm.stopBroadcast();
+        
         // Additional helpers for interacting with the pool
         vm.startBroadcast();
         IPositionManager posm = deployPosm(manager);
@@ -63,7 +62,7 @@ contract CounterScript is Script, DeployPermit2 {
 
         // test the lifecycle (create pool, add liquidity, swap)
         vm.startBroadcast();
-        testLifecycle(manager, address(counter), posm, lpRouter, swapRouter);
+        testLifecycle(manager, counter, posm, lpRouter, swapRouter);
         vm.stopBroadcast();
     }
 
@@ -108,6 +107,38 @@ contract CounterScript is Script, DeployPermit2 {
         }
     }
 
+    function deployHook() public returns (address) {
+        mc.init("Counter");
+        Base base = new Base();
+        mc.use("getHookPermissions", Base.getHookPermissions.selector, address(base));
+        mc.use("validateHookAddress", Base.validateHookAddress.selector, address(base));
+        mc.use("AfterSwap", AfterSwap.afterSwap.selector, address(new AfterSwap()));
+        mc.use("BeforeAddLiquidity", BeforeAddLiquidity.beforeAddLiquidity.selector, address(new BeforeAddLiquidity()));
+        mc.use("BeforeRemoveLiquidity", BeforeRemoveLiquidity.beforeRemoveLiquidity.selector, address(new BeforeRemoveLiquidity()));
+        mc.use("BeforeSwap", BeforeSwap.beforeSwap.selector, address(new BeforeSwap()));
+        mc.useFacade(address(new CounterFacade()));
+        address dictionaryAddress = mc.deployDictionary().addr;
+        
+        // hook contracts must have specific flags encoded in the address
+        uint160 permissions = uint160(
+            Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
+                | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
+        );
+
+        bytes memory initializeArgs = abi.encodeWithSelector(Base.validateHookAddress.selector);
+        
+        // Mine a salt that will produce a hook address with the correct permissions
+        (address hookAddress, bytes32 salt) =
+            HookMiner.find(CREATE2_DEPLOYER, permissions, type(UCSProxy).creationCode, abi.encode(dictionaryAddress, initializeArgs));
+
+        // ----------------------------- //
+        // Deploy the hook using CREATE2 //
+        // ----------------------------- //
+        UCSProxy counter = new UCSProxy{salt: salt}(dictionaryAddress, initializeArgs);
+        require(address(counter) == hookAddress, "CounterScript: hook address mismatch");
+        return address(counter);
+    }
+
     function testLifecycle(
         IPoolManager manager,
         address hook,
@@ -115,6 +146,9 @@ contract CounterScript is Script, DeployPermit2 {
         PoolModifyLiquidityTest lpRouter,
         PoolSwapTest swapRouter
     ) internal {
+
+        uint256 schemaSlot = 0x3b60124079255925a9b0c57f1ed870358d719ce06c4ae9645b74322357c0b400;
+
         (MockERC20 token0, MockERC20 token1) = deployTokens();
         token0.mint(msg.sender, 100_000 ether);
         token1.mint(msg.sender, 100_000 ether);
@@ -157,6 +191,13 @@ contract CounterScript is Script, DeployPermit2 {
             ZERO_BYTES
         );
 
+
+        console.log("before swap");
+        for (uint i;i<2;++i) {
+            console.logBytes32(vm.load(hook, bytes32(schemaSlot + i)));
+        }
+
+        {
         // swap some tokens
         bool zeroForOne = true;
         int256 amountSpecified = 1 ether;
@@ -168,5 +209,11 @@ contract CounterScript is Script, DeployPermit2 {
         PoolSwapTest.TestSettings memory testSettings =
             PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
         swapRouter.swap(poolKey, params, testSettings, ZERO_BYTES);
+        }
+
+        console.log("after swap");
+        for (uint i;i<2;++i) {
+            console.logBytes32(vm.load(hook, bytes32(schemaSlot + i)));
+        }
     }
 }
