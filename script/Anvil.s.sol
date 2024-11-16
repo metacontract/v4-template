@@ -43,7 +43,8 @@ contract CounterScript is MCScript, DeployPermit2 {
     using EasyPosm for IPositionManager;
 
     address constant CREATE2_DEPLOYER = address(0x4e59b44847b379578588920cA78FbF26c0B4956C);
-    
+    IPositionManager posm;
+
     function setUp() public {}
 
     function run() public {
@@ -56,13 +57,13 @@ contract CounterScript is MCScript, DeployPermit2 {
         
         // Additional helpers for interacting with the pool
         vm.startBroadcast();
-        IPositionManager posm = deployPosm(manager);
+        posm = deployPosm(manager);
         (PoolModifyLiquidityTest lpRouter, PoolSwapTest swapRouter,) = deployRouters(manager);
         vm.stopBroadcast();
 
         // test the lifecycle (create pool, add liquidity, swap)
         vm.startBroadcast();
-        testLifecycle(manager, counter, posm, lpRouter, swapRouter);
+        testLifecycle(manager, counter, lpRouter, swapRouter);
         vm.stopBroadcast();
     }
 
@@ -142,7 +143,6 @@ contract CounterScript is MCScript, DeployPermit2 {
     function testLifecycle(
         IPoolManager manager,
         address hook,
-        IPositionManager posm,
         PoolModifyLiquidityTest lpRouter,
         PoolSwapTest swapRouter
     ) internal {
